@@ -249,7 +249,11 @@ def extract_radiomics_features(image_path, mask_path, params):
             
             if 'imageType' in params:
                 for imageType, customSettings in params['imageType'].items():
-                    extractor.enableImageTypeByName(imageType, customSettings=customSettings)
+                    # Fixed: Pass customSettings as positional parameter, not keyword argument
+                    if customSettings:
+                        extractor.enableImageTypeByName(imageType, customSettings)
+                    else:
+                        extractor.enableImageTypeByName(imageType)
         else:
             extractor = featureextractor.RadiomicsFeatureExtractor()
         
