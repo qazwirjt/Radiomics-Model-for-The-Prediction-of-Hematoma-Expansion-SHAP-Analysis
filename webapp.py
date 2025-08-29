@@ -82,7 +82,8 @@ def load_csv_data(path):
 _img_type_config = {
     'Original': {},
     'Wavelet': {},
-    'LoG': {'sigma': [1.0, 2.0, 3.0]}
+    'LoG': {'sigma': [1.0, 2.0, 3.0]},
+    'SquareRoot': {}
 }
 
 @st.cache_data
@@ -131,8 +132,25 @@ def _construct_params():
         'label': base_config.pop('label'),
         'normalize': base_config.pop('normalize')
     }
-    base_config['imageType']['SquareRoot'] = {}
     return base_config
+
+# Alternative: Load parameters from YAML file
+def load_params_from_yaml(yaml_path="params_wavelet.yaml"):
+    """
+    Alternative function to load parameters directly from YAML file
+    Uncomment and use this if you want to load from your YAML file directly
+    """
+    try:
+        import yaml
+        with open(yaml_path, 'r') as file:
+            params = yaml.safe_load(file)
+        return params
+    except FileNotFoundError:
+        st.warning(f"YAML parameter file '{yaml_path}' not found. Using default parameters.")
+        return _construct_params()
+    except Exception as e:
+        st.error(f"Error loading YAML parameters: {e}")
+        return _construct_params()
 
 @st.cache_resource
 def load_model_file(path):
