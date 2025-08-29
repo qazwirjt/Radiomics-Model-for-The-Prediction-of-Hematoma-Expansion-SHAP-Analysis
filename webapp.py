@@ -79,12 +79,39 @@ def load_csv_data(path):
         st.error(f"Error loading CSV file '{path}': {e}")
         return None
 
-_img_type_config = {
-    'Original': {},
-    'Wavelet': {},
-    'LoG': {'sigma': [1.0, 2.0, 3.0]},
-    'SquareRoot': {}
-}
+def _construct_params():
+    """Construct complete PyRadiomics parameter configuration matching YAML file structure"""
+    params = {
+        # Image type settings
+        'imageType': {
+            'Original': {},  # Enable original image features
+            'Wavelet': {},   # Enable wavelet features with default settings
+            'LoG': {         # Enable Laplacian of Gaussian with specified sigmas
+                'sigma': [1.0, 2.0, 3.0]
+            },
+            'SquareRoot': {} # Enable square root transformation
+        },
+        # Global settings
+        'setting': {
+            'binWidth': 25,                        # Gray level discretization bin width
+            'resampledPixelSpacing': [1, 1, 1],    # Resampling spacing [x,y,z]
+            'interpolator': 'sitkBSpline',         # Interpolator for resampling
+            'label': 1,                             # Label value in segmentation mask
+            'normalize': True,                      # Enable normalization
+            'force2D': False                        # Force 2D extraction
+        },
+        # Feature class settings
+        'featureClass': {
+            'shape': None,      # Shape features
+            'firstorder': None, # First order statistics
+            'glcm': None,      # Gray Level Co-occurrence Matrix
+            'glrlm': None,     # Gray Level Run Length Matrix
+            'glszm': None,     # Gray Level Size Zone Matrix
+            'ngtdm': None,     # Neighbouring Gray Tone Difference Matrix
+            'gldm': None       # Gray Level Dependence Matrix
+        }
+    }
+    return params
 
 @st.cache_data
 def load_standardization_parameters(path):
@@ -113,45 +140,6 @@ def load_standardization_parameters(path):
         st.error(f"Error loading standardization parameters file: {e}")
         return None
 
-def _get_extraction_settings():
-    return {
-        'binWidth': 25,
-        'resampledPixelSpacing': [1, 1, 1],
-        'interpolator': 'sitkBSpline',
-        'label': 1,
-        'normalize': True
-    }
-
-def _construct_params():
-    base_config = _get_extraction_settings()
-    base_config['imageType'] = _img_type_config
-    base_config['setting'] = {
-        'binWidth': base_config.pop('binWidth'),
-        'resampledPixelSpacing': base_config.pop('resampledPixelSpacing'),
-        'interpolator': base_config.pop('interpolator'),
-        'label': base_config.pop('label'),
-        'normalize': base_config.pop('normalize')
-    }
-    return base_config
-
-# Alternative: Load parameters from YAML file
-def load_params_from_yaml(yaml_path="params_wavelet.yaml"):
-    """
-    Alternative function to load parameters directly from YAML file
-    Uncomment and use this if you want to load from your YAML file directly
-    """
-    try:
-        import yaml
-        with open(yaml_path, 'r') as file:
-            params = yaml.safe_load(file)
-        return params
-    except FileNotFoundError:
-        st.warning(f"YAML parameter file '{yaml_path}' not found. Using default parameters.")
-        return _construct_params()
-    except Exception as e:
-        st.error(f"Error loading YAML parameters: {e}")
-        return _construct_params()
-
 @st.cache_resource
 def load_model_file(path):
     try:
@@ -164,6 +152,7 @@ def load_model_file(path):
         st.error(f"Error loading model file '{path}': {e}")
         return None
 
+# Load configuration files
 standardization_info = load_standardization_parameters(STANDARDIZATION_PARAMS_PATH)
 shap_background_df = load_csv_data(SHAP_BACKGROUND_DATA_PATH)
 radiomics_params = _construct_params()
@@ -257,34 +246,55 @@ else:
     CLINICAL_FEATURES = []
 
 def extract_radiomics_features(image_path, mask_path, params):
+    """Extract radiomics features following parameter configuration strictly"""
     try:
+        extractor = featureextractor.RadiomicsFeatureExtractor()
+        
         if params:
-            extractor = featureextractor.RadiomicsFeatureExtractor()
-            
+            # 1. Apply global settings
             if 'setting' in params:
                 for key, value in params['setting'].items():
                     extractor.settings[key] = value
+                st.info(f"Applied global settings: {params['setting']}")
             
+            # 2. Enable specified image types
             if 'imageType' in params:
                 for imageType, customSettings in params['imageType'].items():
-                    # Fixed: Pass customSettings as positional parameter, not keyword argument
                     if customSettings:
                         extractor.enableImageTypeByName(imageType, customSettings)
                     else:
                         extractor.enableImageTypeByName(imageType)
+                st.info(f"Enabled image types: {list(params['imageType'].keys())}")
+            
+            # 3. Enable specified feature classes (key modification: don't use enableAllFeatures)
+            if 'featureClass' in params:
+                for featureClass, settings in params['featureClass'].items():
+                    if settings is not None:
+                        extractor.enableFeatureClassByName(featureClass, settings)
+                    else:
+                        extractor.enableFeatureClassByName(featureClass)
+                st.info(f"Enabled feature classes: {list(params['featureClass'].keys())}")
+            else:
+                # Only enable all features if featureClass is not specified
+                extractor.enableAllFeatures()
+                st.warning("No feature classes specified, enabled all features")
         else:
+            # Use default settings if no parameters provided
             extractor = featureextractor.RadiomicsFeatureExtractor()
+            extractor.enableAllFeatures()
         
-        extractor.enableAllFeatures()
-        st.info("All feature classes enabled")
-        
+        # Display enabled configuration details
+        enabled_features = extractor.enabledFeatures
         enabled_image_types = extractor.enabledImagetypes
-        if enabled_image_types:
-            st.info(f"Enabled image types: {list(enabled_image_types.keys())}")
         
+        st.info(f"Enabled image types: {list(enabled_image_types.keys())}")
+        st.info(f"Enabled feature classes: {list(enabled_features.keys())}")
+        
+        # Extract features
         st.info("Extracting radiomics features, please wait...")
         feature_vector = extractor.execute(image_path, mask_path)
         
+        # Filter diagnostic information, keep only feature values
         feature_dict = {}
         for key, value in feature_vector.items():
             if not key.startswith('diagnostics_'):
@@ -293,7 +303,20 @@ def extract_radiomics_features(image_path, mask_path, params):
                 except Exception:
                     feature_dict[key] = value
         
+        # Count features by type
+        feature_stats = {}
+        for feature_name in feature_dict.keys():
+            # Parse feature type
+            parts = feature_name.split('_')
+            if len(parts) >= 2:
+                image_type = parts[0]
+                if image_type not in feature_stats:
+                    feature_stats[image_type] = 0
+                feature_stats[image_type] += 1
+        
         st.success(f"Successfully extracted {len(feature_dict)} features")
+        st.info(f"Feature distribution: {feature_stats}")
+        
         return feature_dict
         
     except Exception as e:
