@@ -240,7 +240,7 @@ def extract_radiomics_features(image_path, mask_path, params=None):
         
         for imageType, customSettings in _image_configs.items():
             if customSettings:
-                extractor.enableImageTypeByName(imageType, customSettings=customSettings)
+                extractor.enableImageTypeByName(imageType, customSettings)
             else:
                 extractor.enableImageTypeByName(imageType)
         
