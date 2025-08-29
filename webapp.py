@@ -10,6 +10,7 @@ import radiomics
 from radiomics import featureextractor
 import json
 import re
+import yaml
 
 st.set_page_config(layout="wide", page_title="Radiomics Model for The Prediction of Hematoma Expansion & SHAP Analysis")
 
@@ -231,18 +232,22 @@ else:
 
 def extract_radiomics_features(image_path, mask_path, params=None):
     try:
-        extractor = featureextractor.RadiomicsFeatureExtractor()
-        
         _settings, _image_configs = _get_extraction_config()
         
-        for key, value in _settings.items():
-            extractor.settings[key] = value
+        _config_dict = {
+            'imageType': _image_configs,
+            'setting': _settings
+        }
         
-        for imageType, customSettings in _image_configs.items():
-            if customSettings:
-                extractor.enableImageTypeByName(imageType, customSettings)
-            else:
-                extractor.enableImageTypeByName(imageType)
+        import tempfile
+        import yaml
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as temp_yaml:
+            yaml.dump(_config_dict, temp_yaml)
+            temp_yaml_path = temp_yaml.name
+        
+        extractor = featureextractor.RadiomicsFeatureExtractor(temp_yaml_path)
+        
+        os.unlink(temp_yaml_path)
         
         extractor.enableAllFeatures()
         st.info("All feature classes enabled")
